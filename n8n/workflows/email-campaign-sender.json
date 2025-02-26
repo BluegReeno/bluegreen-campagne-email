@@ -1,0 +1,445 @@
+{
+  "name": "Email Campaign Sender",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1-5"
+            }
+          ]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "id": "6f9c2e87-1234-4567-8901-23456789abcd"
+    },
+    {
+      "parameters": {
+        "operation": "query_database",
+        "databaseId": "19fa1510-e2f2-804c-9a1f-cb60fc19f98d",
+        "filter": {
+          "property": "Stage",
+          "status": {
+            "equals": "En cours"
+          }
+        },
+        "additionalOptions": {}
+      },
+      "name": "Notion - Get Active Campaigns",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [
+        480,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "1",
+          "name": "Notion account"
+        }
+      },
+      "id": "6f9c2e87-1234-4567-8901-23456789abce"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pour chaque campagne active, on prérepare les données\nconst activeNotionCampaigns = $input.item.json.results;\n\n// On ne prend que les campagnes qui ont besoin d'être traitées aujourd'hui\nconst today = new Date();\nconst campaignsToProcess = [];\n\nfor (const campaign of activeNotionCampaigns) {\n  const properties = campaign.properties;\n  \n  // Si c'est une campagne en cours\n  if (properties.Stage && properties.Stage.status && properties.Stage.status.name === \"En cours\") {\n    // On récupère les informations importantes\n    const campaignData = {\n      id: campaign.id,\n      name: properties.\"Nom de la campagne\".title[0]?.plain_text || \"Sans titre\",\n      responsable: properties.Responsable?.people?.[0]?.name || \"Non assigné\",\n      dateLancement: properties.\"Date de lancement\"?.date?.start || null,\n      dateFinPrevue: properties.\"Date de fin prévue\"?.date?.start || null,\n      plateforme: properties.Plateforme?.multi_select?.map(p => p.name) || [],\n      brief: properties.Brief?.rich_text?.[0]?.plain_text || \"\",\n      objectif: properties.Objectif?.rich_text?.[0]?.plain_text || \"\"\n    };\n    \n    // On vérifie si la campagne contient la plateforme \"Mailing\"\n    if (campaignData.plateforme.includes(\"Mailing\")) {\n      campaignsToProcess.push(campaignData);\n    }\n  }\n}\n\nreturn { campaignsToProcess };",
+        "jsCodeSandbox": true
+      },
+      "name": "Parse Active Campaigns",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        700,
+        300
+      ],
+      "id": "6f9c2e87-1234-4567-8901-23456789abcf"
+    },
+    {
+      "parameters": {
+        "fields": {
+          "values": [
+            {
+              "name": "campaignData",
+              "value": "={{ $json.campaignsToProcess }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set Campaign Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        920,
+        300
+      ],
+      "id": "6f9c2e87-1234-4567-8901-23456789abc0"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "multiplex",
+        "options": {
+          "cloneInputItems": true
+        }
+      },
+      "name": "Split By Campaign",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        300
+      ],
+      "id": "6f9c2e87-1234-4567-8901-23456789abc1"
+    },
+    {
+      "parameters": {
+        "operation": "query_database",
+        "databaseId": "15ea1510-e2f2-813c-a78a-e60180b43d99",
+        "filter": {
+          "relation": {
+            "relation": {
+              "contains": "={{ $json.id }}"
+            },
+            "property": "Included in Campaign"
+          }
+        },
+        "additionalOptions": {}
+      },
+      "name": "Notion - Get Campaign Contacts",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "1",
+          "name": "Notion account"
+        }
+      },
+      "id": "6f9c2e87-1234-4567-8901-23456789abc2"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Créer une entrée dans la table campaigns si elle n'existe pas déjà\nINSERT INTO campaigns (name, description, status, notion_campaign_id)\nVALUES ('{{ $json.name }}', '{{ $json.objectif }}', 'active', '{{ $json.id }}')\nON CONFLICT (notion_campaign_id) \nDO UPDATE SET \n  name = EXCLUDED.name,\n  description = EXCLUDED.description,\n  status = EXCLUDED.status\nRETURNING id;",
+        "additionalFields": {}
+      },
+      "name": "Supabase - Ensure Campaign",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1580,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "2",
+          "name": "Supabase account"
+        }
+      },
+      "id": "6f9c2e87-1234-4567-8901-23456789abc3"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "multiplex",
+        "options": {}
+      },
+      "name": "Split By Contact",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        300
+      ],
+      "id": "6f9c2e87-1234-4567-8901-23456789abc4"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Générer un ID de tracking unique\nconst trackingId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);\n\n// Extraction des propriétés du contact Notion\nconst properties = $input.item.json.properties;\nconst campaignId = $input.item.json.campaign_id;\n\n// Préparation des données du contact pour Supabase\nconst contactData = {\n  email: properties[\"Email Address\"]?.email || \"\",\n  first_name: properties[\"Prénom et Nom\"]?.title?.[0]?.plain_text?.split(\" \")?.[0] || \"\",\n  last_name: properties[\"Prénom et Nom\"]?.title?.[0]?.plain_text?.split(\" \").slice(1).join(\" \") || \"\",\n  company: properties[\"Entreprise\"]?.relation?.[0]?.id || \"\",\n  notion_contact_id: $input.item.json.id,\n  notion_company_id: properties[\"Entreprise\"]?.relation?.[0]?.id || \"\",\n  tracking_id: trackingId,\n  campaign_id: campaignId\n};\n\n// Préparation du sujet et du contenu de l'email\n// Note: dans un cas réel, on récupérerait ces informations de Notion ou d'un template\nconst emailSubject = `${contactData.first_name}, découvrez comment BlueGreen optimise l'efficacité des projets durables`;\n\n// Préparation du contenu HTML avec pixel de tracking et liens trackés\nconst pixelUrl = `https://yourdomain.supabase.co/functions/v1/track-pixel?tid=${trackingId}`;\nconst websiteUrl = `https://yourdomain.supabase.co/functions/v1/track-link?tid=${trackingId}&url=https://bluegreen.ai`;\n\nconst emailContent = `<html>\n<body>\n  <p>Bonjour ${contactData.first_name},</p>\n  \n  <p>J'espère que vous allez bien. Je me permets de vous contacter car BlueGreen aide les équipes d'ingénierie engagées dans des projets durables à améliorer leur efficacité.</p>\n  \n  <p>Nous avons développé des solutions digitales sur mesure qui permettent d'optimiser les processus métier sans perturber vos pratiques existantes, notamment dans le secteur des énergies renouvelables.</p>\n  \n  <p>Seriez-vous disponible pour un court appel afin d'échanger sur vos enjeux et voir comment nous pourrions vous accompagner ?</p>\n  \n  <p>Pour en savoir plus sur nos solutions, n'hésitez pas à consulter <a href=\"${websiteUrl}\">notre site web</a>.</p>\n  \n  <p>Bien cordialement,<br>\nL'équipe BlueGreen</p>\n  \n  <img src=\"${pixelUrl}\" width=\"1\" height=\"1\" alt=\"\" style=\"display:none\">\n</body>\n</html>`;\n\nreturn {\n  ...contactData,\n  subject: emailSubject,\n  content: emailContent\n};",
+        "jsCodeSandbox": true
+      },
+      "name": "Prepare Email Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        2020,
+        300
+      ],
+      "id": "6f9c2e87-1234-4567-8901-23456789abc5"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Insérer l'email dans la base Supabase\nINSERT INTO emails (\n  campaign_id,\n  email,\n  first_name,\n  last_name,\n  company,\n  notion_contact_id,\n  notion_company_id,\n  tracking_id,\n  status,\n  sequence_step\n)\nVALUES (\n  '{{ $json.campaign_id }}',\n  '{{ $json.email }}',\n  '{{ $json.first_name }}',\n  '{{ $json.last_name }}',\n  '{{ $json.company }}',\n  '{{ $json.notion_contact_id }}',\n  '{{ $json.notion_company_id }}',\n  '{{ $json.tracking_id }}',\n  'pending',\n  0\n)\nRETURNING id;",
+        "additionalFields": {}
+      },
+      "name": "Supabase - Create Email Record",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2240,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "2",
+          "name": "Supabase account"
+        }
+      },
+      "id": "6f9c2e87-1234-4567-8901-23456789abc6"
+    },
+    {
+      "parameters": {
+        "fromEmail": "contact@bluegreen.ai",
+        "toEmail": "={{ $json.email }}",
+        "subject": "={{ $json.subject }}",
+        "contentType": "html",
+        "message": "={{ $json.content }}",
+        "ccEmail": "",
+        "bccEmail": "",
+        "attachments": []
+      },
+      "name": "Gmail - Send Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [
+        2460,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "3",
+          "name": "Gmail account"
+        }
+      },
+      "id": "6f9c2e87-1234-4567-8901-23456789abc7"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Mettre à jour le statut de l'email\nUPDATE emails\nSET \n  status = 'sent',\n  sent_at = NOW(),\n  message_id = '{{ $json.messageId }}',\n  gmail_thread_id = '{{ $json.threadId }}'\nWHERE tracking_id = '{{ $json.tracking_id }}';",
+        "additionalFields": {}
+      },
+      "name": "Supabase - Update Email Status",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2680,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "2",
+          "name": "Supabase account"
+        }
+      },
+      "id": "6f9c2e87-1234-4567-8901-23456789abc8"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Mise à jour des contacts traités\nconst processedEmails = [];\n\nfor (const item of $input.all()) {\n  if (item.json && item.json.email) {\n    processedEmails.push({\n      email: item.json.email,\n      status: 'sent',\n      tracking_id: item.json.tracking_id\n    });\n  }\n}\n\nreturn { processedEmails, campaignId: $input.first().json.campaign_id };",
+        "jsCodeSandbox": true
+      },
+      "name": "Summarize Campaign Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        2900,
+        300
+      ],
+      "id": "6f9c2e87-1234-4567-8901-23456789abc9"
+    },
+    {
+      "parameters": {
+        "subject": "Rapport d'envoi de campagne BlueGreen",
+        "bodyContent": {
+          "properties": [
+            {
+              "id": 1234,
+              "name": "content",
+              "value": "=Bonjour,\n\nLa campagne d'emailing a été traitée avec succès.\n\nRésumé :\n- Nombre d'emails envoyés : {{ $json.processedEmails.length }}\n\nVous pourrez suivre les ouvertures et clics dans le tableau de bord Notion.\n\nBien cordialement,\nBlueGreen Email Automation"
+            }
+          ]
+        },
+        "toRecipients": {
+          "value": "team@bluegreen.ai"
+        },
+        "additionalFields": {}
+      },
+      "name": "Send Notification Email",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 1,
+      "position": [
+        3120,
+        300
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "4",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "id": "6f9c2e87-1234-4567-8901-23456789abda"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Notion - Get Active Campaigns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notion - Get Active Campaigns": {
+      "main": [
+        [
+          {
+            "node": "Parse Active Campaigns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Active Campaigns": {
+      "main": [
+        [
+          {
+            "node": "Set Campaign Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Campaign Data": {
+      "main": [
+        [
+          {
+            "node": "Split By Campaign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split By Campaign": {
+      "main": [
+        [
+          {
+            "node": "Notion - Get Campaign Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notion - Get Campaign Contacts": {
+      "main": [
+        [
+          {
+            "node": "Supabase - Ensure Campaign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase - Ensure Campaign": {
+      "main": [
+        [
+          {
+            "node": "Split By Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split By Contact": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Email Data": {
+      "main": [
+        [
+          {
+            "node": "Supabase - Create Email Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase - Create Email Record": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Send Email": {
+      "main": [
+        [
+          {
+            "node": "Supabase - Update Email Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase - Update Email Status": {
+      "main": [
+        [
+          {
+            "node": "Summarize Campaign Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Campaign Results": {
+      "main": [
+        [
+          {
+            "node": "Send Notification Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
